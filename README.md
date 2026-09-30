@@ -1,28 +1,44 @@
 # pi-collapse
 
-为 [pi coding agent](https://github.com/earendil-works/pi) 的 TUI 提供一套折叠能力，集中在**一个扩展、一个命令**下。
+**[English](README.md) | [简体中文](README.zh-CN.md)**
 
-## 功能
+Collapsible thinking, commands and transcript for the [pi coding agent](https://github.com/earendil-works/pi) TUI — all behind a single `/collapse` command.
 
-| 功能 | 配置键 | 说明 |
+## Features
+
+| Feature | Config key | Description |
 |---|---|---|
-| 思考自动折叠 | `thinking` | 模型思考时展开，开始输出正文 / 工具后自动折叠，标签显示 `Thinking >` |
-| 长命令折叠 | `cmdlines` | 命令行超过 N 行或 M 字符时折叠成一行摘要（`write x.py` / `python heredoc` / `python -c` / 首条命令） |
-| 高危命令提示 | `danger` | 识别 `rm -rf /`、`dd of=/dev/*`、`git push --force`、`DROP TABLE`、`curl\|bash` 等，命令行前加 `⚠ 说明`；只提示、不拦截 |
-| 对话流折叠 | `transcript` | 每轮对话除最后回复外，其余过程合并成一个折叠块 `> N 项 · 点击展开`；展开后末尾有 `^ 收起` 可点回 |
-| 最小输出 | `minimalOutput` | 折叠态隐藏 `bash`/`powershell`/`read`/`find`/`grep`/`ls` 的输出，`Ctrl+O` 展开才显示 |
+| Thinking auto-collapse | `thinking` | Thinking expands while streaming, then collapses once the answer / tool starts. Collapsed label: `Thinking >`. |
+| Long command fold | `cmdlines` | A shell command over N lines or M chars folds into a one-line summary (`write x.py`, `python heredoc`, `python -c`, or the first meaningful line). |
+| Dangerous command hints | `danger` | Flags `rm -rf /`, `dd of=/dev/*`, `git push --force`, `DROP TABLE`, `curl … \| bash`, … with a `⚠ reason` badge. Hint only — never blocks execution. |
+| Transcript collapse | `transcript` | In each turn, everything except the final assistant reply (thinking, tool calls, `!` commands, summaries) folds into one block `> N items · click to expand`. Expanded blocks have a clickable `^ collapse` row at the bottom. |
+| Minimal output | `minimalOutput` | Hides the output of `bash` / `powershell` / `read` / `find` / `grep` / `ls` while collapsed; `Ctrl+O` expands. |
 
-## 命令
+## Install
 
-```
-/collapse          # 切换总开关（全部折叠功能 开 / 关）
-/collapse on       # 显式开启
-/collapse off      # 显式关闭（恢复 pi 原生显示）
+```bash
+pi install git:github.com/jackiehank/pi-collapse
 ```
 
-## 配置
+Then restart pi or run `/reload`.
 
-所有细项都在 **`~/.pi/agent/collapse.json`**（唯一真源，改完 `/reload` 生效）：
+Local development:
+
+```bash
+pi install ./pi-collapse
+```
+
+## Command
+
+```
+/collapse          # toggle the master switch (all folding on / off)
+/collapse on       # enable
+/collapse off      # disable (restore pi's native display)
+```
+
+## Configuration
+
+Everything lives in `~/.pi/agent/collapse.json` (single source of truth; run `/reload` after editing):
 
 ```json
 {
@@ -33,44 +49,28 @@
   "cmdlinesMaxChars": 200,
   "transcript": true,
   "danger": true,
-  "minimalOutput": true
+  "minimalOutput": true,
+  "lang": "auto"
 }
 ```
 
-- `enabled`：总开关；`false` = 完全恢复 pi 原生行为
-- `cmdlinesMaxLines` / `cmdlinesMaxChars`：任一超阈值即折叠（`0` = 该阈值不启用）
-- 首次运行会写出完整默认模板，并自动从旧的三个状态文件迁移
+- `enabled` — master switch; `false` restores pi's native behavior.
+- `cmdlinesMaxLines` / `cmdlinesMaxChars` — fold when either threshold is exceeded (`0` disables that threshold).
+- `lang` — `auto` (detect from `PI_LANG` / `LC_*` / `LANG` / system locale), `en`, or `zh`.
+- The file is written with a full default template on first run, and migrates settings from the older per-feature state files.
 
-## 安装
+## Scope
 
-方式一：让 pi 直接加载本文件，在 `~/.pi/agent/settings.json` 里加：
+Only the interactive TUI is affected. RPC / print modes are untouched.
 
-```json
-{
-  "extensions": ["~/Dev/pi-collapse/collapse.ts"]
-}
-```
+## Interface dependencies
 
-方式二：把 `collapse.ts` 复制到 `~/.pi/agent/extensions/` 下（自动发现）。
+**Public API** (documented by pi): `pi.on(...)`, `pi.registerTool()`, `pi.registerCommand()`, `ctx.ui.notify()`, `ctx.ui.setHiddenThinkingLabel()`, `createBashTool()` / `createPowerShellTool()` + tool `renderCall` / `renderResult`, `getAgentDir()`, and pi-tui's `Container` / `Text` / `Spacer`.
 
-改完 `/reload` 生效。
+**Internal implementation** (undocumented; may change across pi releases — handled defensively and falls back to native rendering): `AssistantMessageComponent.prototype.updateContent`, `InteractiveMode.prototype.run` / `addMessageToChat`, `Container.prototype.handleMouse`, `ToolExecutionComponent.prototype.getResultRenderer`, `chatContainer.children`.
 
-## 接口依赖
+Every patch is re-installed on each extension load (with the original method remembered, so nothing nests), so `/reload` always runs the latest code.
 
-**公开 API**（pi 文档承诺）：`pi.on(...)`（事件）、`pi.registerTool()`、`pi.registerCommand()`、
-`ctx.ui.notify()`、`ctx.ui.setHiddenThinkingLabel()`、`createBashTool()` / `createPowerShellTool()`
-+ 工具 `renderCall` / `renderResult`、`getAgentDir()`、pi-tui 的 `Container` / `Text` / `Spacer`。
+## License
 
-**内部实现**（未文档化，pi 升级可能变，已做防御式处理、失效时静默退回原生）：
-
-- `AssistantMessageComponent.prototype.updateContent` 及 `hideThinkingBlock` / `thinkingVisibilityOverrides`
-- `InteractiveMode.prototype.run` / `addMessageToChat`，字段 `chatContainer` / `ui`
-- `chatContainer.children` + 组件识别（`instanceof` 优先，类名兜底）
-- `Container.prototype.handleMouse`
-- `ToolExecutionComponent.prototype.getResultRenderer`，字段 `toolName` / `expanded`
-
-所有 patch 都在每次扩展加载时重装（记录最初实现，避免嵌套），`/reload` 后跑的是新代码。
-
-## 仅影响 TUI
-
-交互模式生效；RPC / print 模式无副作用。
+[MIT](LICENSE)

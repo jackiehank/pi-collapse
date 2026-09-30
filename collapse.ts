@@ -121,6 +121,8 @@ interface Config {
 	danger: boolean;
 	/** 折叠态隐藏工具输出（minimal 模式）；仅配置项，不进菜单 */
 	minimalOutput: boolean;
+	/** 界面语言：auto（按环境推断）/ en / zh */
+	lang: "auto" | "en" | "zh";
 }
 
 /** 从旧版三个状态文件迁移（仅在新状态文件不存在时使用）。 */
@@ -134,6 +136,7 @@ function migrateLegacy(): Config {
 		transcript: true,
 		danger: true,
 		minimalOutput: true,
+		lang: "auto",
 	};
 	const legacy: { file: string; apply: (raw: any) => void }[] = [
 		{
@@ -184,6 +187,7 @@ function normalize(raw: Partial<Config> | undefined, base: Config): Config {
 		transcript: typeof raw?.transcript === "boolean" ? raw.transcript : base.transcript,
 		danger: typeof raw?.danger === "boolean" ? raw.danger : base.danger,
 		minimalOutput: typeof raw?.minimalOutput === "boolean" ? raw.minimalOutput : base.minimalOutput,
+		lang: raw?.lang === "en" || raw?.lang === "zh" ? raw.lang : base.lang,
 	};
 }
 
@@ -224,6 +228,70 @@ function patchProto(proto: any, key: string): any {
 	}
 	return proto[originalKey];
 }
+
+// =====================================================================
+// i18n
+// =====================================================================
+
+type Lang = "en" | "zh";
+
+interface I18NStrings {
+	foldClosed: (n: number) => string;
+	foldOpen: (n: number) => string;
+	foldFooter: (n: number) => string;
+	expandHint: string;
+	lines: (n: number) => string;
+	chars: (n: number) => string;
+	masterOn: string;
+	masterOff: string;
+	usage: string;
+}
+
+const I18N: Record<Lang, I18NStrings> = {
+	en: {
+		foldClosed: (n) => `> ${n} items · click to expand`,
+		foldOpen: (n) => `v ${n} items · click to collapse`,
+		foldFooter: (n) => `^ collapse (${n} items) · click to collapse`,
+		expandHint: "ctrl+o to expand",
+		lines: (n) => `${n} lines`,
+		chars: (n) => `${n} chars`,
+		masterOn: "Collapse bundle: on",
+		masterOff: "Collapse bundle: off (pi native display restored)",
+		usage: "Usage: /collapse [on|off]",
+	},
+	zh: {
+		foldClosed: (n) => `> ${n} 项 · 点击展开`,
+		foldOpen: (n) => `v ${n} 项 · 点击折叠`,
+		foldFooter: (n) => `^ 收起（${n} 项）· 点击折叠`,
+		expandHint: "ctrl+o 展开",
+		lines: (n) => `${n} 行`,
+		chars: (n) => `${n} 字符`,
+		masterOn: "折叠：已开启",
+		masterOff: "折叠：已关闭（恢复 pi 原生显示）",
+		usage: "用法：/collapse [on|off]",
+	},
+};
+
+/** `auto` 时按环境语言推断（PI_LANG / LC_* / LANG / 系统 locale），默认英文。 */
+function detectLang(setting: string): Lang {
+	if (setting === "en" || setting === "zh") return setting;
+	const env = [process.env.PI_LANG, process.env.LC_ALL, process.env.LC_MESSAGES, process.env.LANG]
+		.filter(Boolean)
+		.join(" ");
+	if (env) {
+		if (/zh|hans|hant|cn/i.test(env)) return "zh";
+		if (/en/i.test(env)) return "en";
+	}
+	try {
+		if (/^zh/i.test(Intl.DateTimeFormat().resolvedOptions().locale ?? "")) return "zh";
+	} catch {
+		/* ignore */
+	}
+	return "en";
+}
+
+const lang: Lang = detectLang(config.lang);
+const t: I18NStrings = I18N[lang];
 
 /** 会话内的 UI 上下文（用于思考标签 / 通知）。 */
 let sessionUi: any;
@@ -361,6 +429,7 @@ type DangerLevel = "high" | "medium";
 interface DangerRule {
 	level: DangerLevel;
 	label: string;
+	labelEn: string;
 	re: RegExp;
 }
 
@@ -370,36 +439,36 @@ interface DangerRule {
  */
 const DANGER_RULES: DangerRule[] = [
 	// ---- 高危 ----
-	{ level: "high", label: "删除根/家目录", re: /\brm\s+(?:-[a-zA-Z]+\s+)*-[a-zA-Z]*[rf][a-zA-Z]*\s+(?:\/|~|\$HOME)(?:\s|\/|\*|$)/i },
-	{ level: "high", label: "写入块设备", re: /\bdd\b[^\n]*\bof=\/dev\//i },
-	{ level: "high", label: "格式化文件系统", re: /\bmkfs(?:\.\w+)?\b\s/i },
-	{ level: "high", label: "擦除文件系统签名", re: /\bwipefs\b/i },
-	{ level: "high", label: "fork 炸弹", re: /:\s*\(\s*\)\s*\{/ },
-	{ level: "high", label: "开放根目录权限", re: /\bchmod\s+(?:-R\s+)?[0-7]?777\s+(?:\/|\*)/i },
-	{ level: "high", label: "递归改属主", re: /\bchown\s+(?:-[a-zA-Z]+\s+)*-[a-zA-Z]*R[a-zA-Z]*\s+[^\n]*\s(?:\/|~)(?:\s|\/|$)/ },
-	{ level: "high", label: "格式化盘符", re: /\bformat\s+[a-z]:/i },
-	{ level: "high", label: "Windows 递归强删", re: /\b(?:del|erase)\b[^\n]*\/[fsq]/i },
-	{ level: "high", label: "Windows 删除目录树", re: /\b(?:rd|rmdir)\b[^\n]*\/s/i },
-	{ level: "high", label: "PowerShell 递归强删", re: /\bRemove-Item\b[^\n]*-(?:Recurse|Force)\b/i },
-	{ level: "high", label: "关机/重启系统", re: /\b(?:shutdown\s+-[a-z]*[hr]|reboot|halt|Stop-Computer|Restart-Computer)\b/i },
+	{ level: "high", label: "删除根/家目录", labelEn: "delete root/home", re: /\brm\s+(?:-[a-zA-Z]+\s+)*-[a-zA-Z]*[rf][a-zA-Z]*\s+(?:\/|~|\$HOME)(?:\s|\/|\*|$)/i },
+	{ level: "high", label: "写入块设备", labelEn: "write to block device", re: /\bdd\b[^\n]*\bof=\/dev\//i },
+	{ level: "high", label: "格式化文件系统", labelEn: "format filesystem", re: /\bmkfs(?:\.\w+)?\b\s/i },
+	{ level: "high", label: "擦除文件系统签名", labelEn: "wipe filesystem signatures", re: /\bwipefs\b/i },
+	{ level: "high", label: "fork 炸弹", labelEn: "fork bomb", re: /:\s*\(\s*\)\s*\{/ },
+	{ level: "high", label: "开放根目录权限", labelEn: "world-writable root", re: /\bchmod\s+(?:-R\s+)?[0-7]?777\s+(?:\/|\*)/i },
+	{ level: "high", label: "递归改属主", labelEn: "recursive chown", re: /\bchown\s+(?:-[a-zA-Z]+\s+)*-[a-zA-Z]*R[a-zA-Z]*\s+[^\n]*\s(?:\/|~)(?:\s|\/|$)/ },
+	{ level: "high", label: "格式化盘符", labelEn: "format drive", re: /\bformat\s+[a-z]:/i },
+	{ level: "high", label: "Windows 递归强删", labelEn: "force recursive delete (Windows)", re: /\b(?:del|erase)\b[^\n]*\/[fsq]/i },
+	{ level: "high", label: "Windows 删除目录树", labelEn: "delete directory tree (Windows)", re: /\b(?:rd|rmdir)\b[^\n]*\/s/i },
+	{ level: "high", label: "PowerShell 递归强删", labelEn: "force recursive delete (PowerShell)", re: /\bRemove-Item\b[^\n]*-(?:Recurse|Force)\b/i },
+	{ level: "high", label: "关机/重启系统", labelEn: "shutdown / reboot", re: /\b(?:shutdown\s+-[a-z]*[hr]|reboot|halt|Stop-Computer|Restart-Computer)\b/i },
 	// ---- 中危 ----
-	{ level: "medium", label: "递归/强制删除", re: /\brm\s+(?:-[a-zA-Z]+\s+)*-[a-zA-Z]*[rf][a-zA-Z]*\b/i },
-	{ level: "medium", label: "强制推送", re: /\bgit\s+push\b[^\n]*(?:--force\b|\s-f\b)/i },
-	{ level: "medium", label: "硬重置", re: /\bgit\s+reset\s+--hard\b/i },
-	{ level: "medium", label: "清理未跟踪文件", re: /\bgit\s+clean\s+-[a-z]*[fdx]/i },
-	{ level: "medium", label: "删除分支", re: /\bgit\s+branch\s+-D\b/ },
-	{ level: "medium", label: "删除数据库/表", re: /\b(?:drop\s+(?:database|table)|truncate\s+table)\b/i },
-	{ level: "medium", label: "无 WHERE 的 DELETE", re: /\bdelete\s+from\b(?![^;]*\bwhere\b)/i },
-	{ level: "medium", label: "Docker 清理", re: /\bdocker\s+(?:system\s+prune|volume\s+prune|rmi)\b/i },
-	{ level: "medium", label: "kubectl 删除", re: /\bkubectl\s+delete\b/i },
-	{ level: "medium", label: "terraform destroy", re: /\bterraform\s+destroy\b/i },
-	{ level: "medium", label: "S3 递归删除", re: /\baws\s+s3\s+rm\b[^\n]*--recursive/i },
-	{ level: "medium", label: "发布到 npm", re: /\bnpm\s+publish\b/i },
-	{ level: "medium", label: "下载并执行远程脚本", re: /\b(?:curl|wget)\b[^\n|]*\|\s*(?:ba|z|k)?sh\b/i },
-	{ level: "medium", label: "eval 执行字符串", re: /\beval\b/ },
-	{ level: "medium", label: "放开执行策略", re: /\bSet-ExecutionPolicy\s+(?:Unrestricted|Bypass)\b/i },
-	{ level: "medium", label: "Invoke-Expression", re: /\b(?:Invoke-Expression|iex)\b/i },
-	{ level: "medium", label: "监听端口", re: /\bnc\s+-l/i },
+	{ level: "medium", label: "递归/强制删除", labelEn: "recursive/force delete", re: /\brm\s+(?:-[a-zA-Z]+\s+)*-[a-zA-Z]*[rf][a-zA-Z]*\b/i },
+	{ level: "medium", label: "强制推送", labelEn: "force push", re: /\bgit\s+push\b[^\n]*(?:--force\b|\s-f\b)/i },
+	{ level: "medium", label: "硬重置", labelEn: "hard reset", re: /\bgit\s+reset\s+--hard\b/i },
+	{ level: "medium", label: "清理未跟踪文件", labelEn: "git clean", re: /\bgit\s+clean\s+-[a-z]*[fdx]/i },
+	{ level: "medium", label: "删除分支", labelEn: "delete branch", re: /\bgit\s+branch\s+-D\b/ },
+	{ level: "medium", label: "删除数据库/表", labelEn: "drop database/table", re: /\b(?:drop\s+(?:database|table)|truncate\s+table)\b/i },
+	{ level: "medium", label: "无 WHERE 的 DELETE", labelEn: "DELETE without WHERE", re: /\bdelete\s+from\b(?![^;]*\bwhere\b)/i },
+	{ level: "medium", label: "Docker 清理", labelEn: "docker prune", re: /\bdocker\s+(?:system\s+prune|volume\s+prune|rmi)\b/i },
+	{ level: "medium", label: "kubectl 删除", labelEn: "kubectl delete", re: /\bkubectl\s+delete\b/i },
+	{ level: "medium", label: "terraform destroy", labelEn: "terraform destroy", re: /\bterraform\s+destroy\b/i },
+	{ level: "medium", label: "S3 递归删除", labelEn: "recursive S3 delete", re: /\baws\s+s3\s+rm\b[^\n]*--recursive/i },
+	{ level: "medium", label: "发布到 npm", labelEn: "npm publish", re: /\bnpm\s+publish\b/i },
+	{ level: "medium", label: "下载并执行远程脚本", labelEn: "pipe remote script to shell", re: /\b(?:curl|wget)\b[^\n|]*\|\s*(?:ba|z|k)?sh\b/i },
+	{ level: "medium", label: "eval 执行字符串", labelEn: "eval", re: /\beval\b/ },
+	{ level: "medium", label: "放开执行策略", labelEn: "relax execution policy", re: /\bSet-ExecutionPolicy\s+(?:Unrestricted|Bypass)\b/i },
+	{ level: "medium", label: "Invoke-Expression", labelEn: "Invoke-Expression", re: /\b(?:Invoke-Expression|iex)\b/i },
+	{ level: "medium", label: "监听端口", labelEn: "listen on port", re: /\bnc\s+-l/i },
 ];
 
 /** 检出命令中的高危 / 中危模式（返回第一条命中的规则）。 */
@@ -497,15 +566,18 @@ function makeRenderCall(prompt: string) {
 			if (overLines || overChars) {
 				const summary = summarizeCommand(command) || lines[0] || "";
 				const short = summary.length > SUMMARY_MAX_CHARS ? `${summary.slice(0, SUMMARY_MAX_CHARS - 1)}…` : summary;
-				const detail = lines.length > 1 ? `${lines.length} lines` : `${command.length} chars`;
-				display = `${short}${theme.fg("muted", `  (${detail}, ctrl+o 展开)`)}`;
+				const detail = lines.length > 1 ? t.lines(lines.length) : t.chars(command.length);
+				display = `${short}${theme.fg("muted", `  (${detail}, ${t.expandHint})`)}`;
 			}
 		}
 
 		// 高危命令识别：在命令行前加 ⚠ 标记（折叠 / 展开都可见）。
 		const danger = config.enabled && config.danger && command ? detectDanger(command) : null;
 		const badge = danger
-			? theme.fg(danger.level === "high" ? "error" : "warning", `⚠ ${danger.label}  `)
+			? theme.fg(
+					danger.level === "high" ? "error" : "warning",
+					`⚠ ${lang === "zh" ? danger.label : danger.labelEn}  `,
+				)
 			: "";
 
 		text.setText(
@@ -663,11 +735,9 @@ function ensureRenderOverride(component: any): void {
 		const entry = groupState.get(state.groupKey);
 		const collapsed = entry ? entry.collapsed : true;
 		const count = entry?.count ?? state.count ?? 0;
-		const header = collapsed
-			? `${DIM}> ${count} 项 · 点击展开${RESET}`
-			: `${DIM}v ${count} 项 · 点击折叠${RESET}`;
+		const header = `${DIM}${collapsed ? t.foldClosed(count) : t.foldOpen(count)}${RESET}`;
 		// 展开时在末尾追加一个"收起"按钮，滚到底顺手点一下就折回。
-		const footer = `${DIM}^ 收起（${count} 项）· 点击折叠${RESET}`;
+		const footer = `${DIM}${t.foldFooter(count)}${RESET}`;
 
 		if (state.role === "hidden") {
 			if (collapsed) return [];
@@ -880,7 +950,7 @@ function applyMasterSwitch(enabled: boolean, ctx: any): void {
 	saveConfig(config);
 	applyThinkingLabel();
 	refreshAll();
-	ctx.ui.notify(`折叠：${enabled ? "已开启" : "已关闭（恢复 pi 原生显示）"}`);
+	ctx.ui.notify(enabled ? t.masterOn : t.masterOff);
 }
 
 // =====================================================================
@@ -919,14 +989,14 @@ export default function collapseBundle(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("collapse", {
-		description: "折叠总开关：/collapse [on|off]（细项见 collapse.json）",
+		description: "Collapse bundle master switch: /collapse [on|off] (details in collapse.json)",
 		handler: async (args, ctx) => {
 			sessionUi = ctx.ui;
 			const arg = args.trim().toLowerCase();
 			if (arg === "on") applyMasterSwitch(true, ctx);
 			else if (arg === "off") applyMasterSwitch(false, ctx);
 			else if (arg === "") applyMasterSwitch(!config.enabled, ctx);
-			else ctx.ui.notify("用法：/collapse [on|off]", "warning");
+			else ctx.ui.notify(t.usage, "warning");
 		},
 	});
 }
