@@ -95,6 +95,9 @@ import {
 // 配置状态
 // =====================================================================
 
+/** 插件版本；与 package.json 的 version 和 git tag 保持一致。 */
+const VERSION = "1.0.0";
+
 const AGENT_DIR = getAgentDir();
 const STATE_FILE = join(AGENT_DIR, "collapse.json");
 const DEFAULT_MAX_LINES = 5;
@@ -950,7 +953,7 @@ function applyMasterSwitch(enabled: boolean, ctx: any): void {
 	saveConfig(config);
 	applyThinkingLabel();
 	refreshAll();
-	ctx.ui.notify(enabled ? t.masterOn : t.masterOff);
+	ctx.ui.notify(`${enabled ? t.masterOn : t.masterOff} (v${VERSION})`);
 }
 
 // =====================================================================

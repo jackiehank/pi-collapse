@@ -71,6 +71,14 @@ Only the interactive TUI is affected. RPC / print modes are untouched.
 
 Every patch is re-installed on each extension load (with the original method remembered, so nothing nests), so `/reload` always runs the latest code.
 
+## Compatibility
+
+Tested with **pi 0.99.1** only.
+
+This extension relies on some undocumented pi internals (see [Interface dependencies](#interface-dependencies)), so it may break on other pi versions. All patches are defensive: if an internal API changes, the affected feature silently falls back to pi's native rendering instead of crashing. When reporting an issue, please include your `pi --version`.
+
+Current version: **v1.0.0** — see [CHANGELOG](CHANGELOG.md).
+
 ## License
 
 [MIT](LICENSE)
