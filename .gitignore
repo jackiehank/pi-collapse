@@ -1,0 +1,9 @@
+# 依赖与构建产物（本扩展无依赖，仅以防万一）
+node_modules/
+*.log
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
